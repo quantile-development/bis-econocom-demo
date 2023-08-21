@@ -1,0 +1,22 @@
+{
+  "name": "bis-econocom-demo",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceFolder": "/workspaces/bis-econocom-demo",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "njpwerner.autodocstring",
+        "zhuangtongfa.material-theme",
+        "bungcip.better-toml",
+        "redhat.vscode-yaml",
+        "waderyan.gitblame",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+  "runArgs": ["--env-file", ".devcontainer/.env"],
+  "postCreateCommand": "poetry config virtualenvs.in-project true && poetry install && git config --global --add safe.directory /workspaces/bis-econocom-demo"
+}
