@@ -5,3 +5,86 @@ environments:
 - name: dev
 - name: staging
 - name: prod
+plugins:
+  extractors:
+  - name: tap-mssql
+    variant: wintersrd
+    pip_url: tap-mssql
+    config:
+      host: host.docker.internal
+      database: test
+      port: 1433
+      user: sa
+      password: password123UP
+    select:
+    - dbo-mock_data.*
+    metadata:
+      dbo-mock_data:
+        replication-method: INCREMENTAL
+        replication-key: updatedAt
+
+  - name: tap-hubspot-incremental
+    namespace: tap_hubspot
+    pip_url: git+https://github.com/BernardWez/tap-hubspot.git
+    executable: tap-hubspot
+    config:
+      access_token: ${HUBSPOT_TOKEN}
+      start_date: '2023-08-25T00:00:00Z'
+      flattening_enabled: true
+      flattening_max_depth: 1
+    select:
+    - contacts.properties.*
+    - '!contacts.associations.*'
+    - '!contacts.associations'
+
+  loaders:
+  - name: target-hubspot
+    variant: meltanolabs
+    pip_url: git+https://github.com/MeltanoLabs/target-hubspot.git
+    config:
+      access_token: ${HUBSPOT_TOKEN}
+      stream_maps:
+        DEVELOPMENT-TAP_HUBSPOT-CONTACTS:
+          UPDATEDAT: __NULL__
+          ID: __NULL__
+
+      column_mapping:
+      - columnName: PROPERTIES__CUSTOM_PROPERTY
+        propertyName: custom_property
+        columnObjectTypeId: 0-1
+      - columnName: PROPERTIES__EMAIL
+        propertyName: email
+        columnObjectTypeId: 0-1
+      - columnName: PROPERTIES__FIRSTNAME
+        propertyName: firstname
+        columnObjectTypeId: 0-1
+      - columnName: PROPERTIES__LASTNAME
+        propertyName: lastname
+        columnObjectTypeId: 0-1
+      import_operations: UPSERT
+
+  - name: target-mssql
+    variant: storebrand
+    pip_url: git+https://github.com/storebrand/target-mssql.git
+    config:
+      host: host.docker.internal
+      database: test
+      port: '1433'
+      username: sa
+      password: password123UP
+
+
+  - name: target-jsonl
+    variant: andyh1203
+    pip_url: target-jsonl
+    
+jobs:
+- name: test-job
+  tasks:
+  - tap-hubspot target-mssql
+  - tap-mssql target-hubspot
+
+schedules:
+- name: daily-test-job
+  interval: '@daily'
+  job: test-job
