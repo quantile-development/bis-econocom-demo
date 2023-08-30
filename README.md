@@ -214,4 +214,4 @@ Tot slot kunnen we deze tap incrementeel data laten ophalen door de volgende con
 
 ## Targets: data verplaatsen naar Hubspot / MS SQL
 
-jlasdkjfal
+TODO
