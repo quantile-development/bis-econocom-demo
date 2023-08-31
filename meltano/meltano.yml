@@ -21,7 +21,7 @@ plugins:
     metadata:
       dbo-mock_data:
         replication-method: INCREMENTAL
-        replication-key: updatedAt
+        replication-key: updated_at
 
   - name: tap-hubspot-incremental
     namespace: tap_hubspot
@@ -43,11 +43,11 @@ plugins:
     pip_url: git+https://github.com/MeltanoLabs/target-hubspot.git
     config:
       access_token: ${HUBSPOT_TOKEN}
+      import_operations: UPSERT
       stream_maps:
         DEVELOPMENT-TAP_HUBSPOT-CONTACTS:
-          UPDATEDAT: __NULL__
+          UPDATED_AT: __NULL__
           ID: __NULL__
-
       column_mapping:
       - columnName: PROPERTIES__CUSTOM_PROPERTY
         propertyName: custom_property
@@ -61,7 +61,6 @@ plugins:
       - columnName: PROPERTIES__LASTNAME
         propertyName: lastname
         columnObjectTypeId: 0-1
-      import_operations: UPSERT
 
   - name: target-mssql
     variant: storebrand
@@ -73,11 +72,6 @@ plugins:
       username: sa
       password: password123UP
 
-
-  - name: target-jsonl
-    variant: andyh1203
-    pip_url: target-jsonl
-    
 jobs:
 - name: test-job
   tasks:
