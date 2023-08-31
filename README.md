@@ -5,6 +5,7 @@ Deze guide legt uit hoe je je eerste Meltano project kun opzetten. De volgende a
 - Set-up: hoe zet je het meltano project op?
 - Taps: hoe haal je data uit Hubspot en MS SQL?
 - Targets: hoe verplaats ik data naar Hubspot / MS SQL?
+- Pipeline runnen: hoe koppel je een tap / target
 
 In de guide wordt verwezen naar handige en nuttige bronnen waar je terecht kunt voor meer informatie.
 
@@ -46,7 +47,7 @@ Het toevoegen van een tap aan het Meltano project is eenvoudig met het volgende 
 
 Op de [Meltano Hub](https://hub.meltano.com/extractors/tap-hubspot) kun je vinden welke taps (i.e. extractors) publiek beschikbaar zijn.
 
-Wanneer een tap is geinstalleerd en je de configuratie hebt toegevoegd kunt je met de volgende command testen of je data kunt binnen halen:
+Wanneer een tap is geinstalleerd en je de configuratie hebt toegevoegd kun je met de volgende command testen of je data kunt binnen halen:
 
 `meltano invoke <tap-name>`
 
@@ -209,9 +210,188 @@ Tot slot kunnen we deze tap incrementeel data laten ophalen door de volgende con
   metadata:
     dbo-mock_data: # Hier stel je de schema_naam-tabel_naam in
       replication-method: INCREMENTAL
-      replication-key: updatedAt # Kolom waarop je incrementeel wilt laten
+      replication-key: updated_at # Kolom waarop je incrementeel wilt laten
 ```
 
 ## Targets: data verplaatsen naar Hubspot / MS SQL
 
-TODO
+Het toevoegen van een target aan het Meltano project kan op vergelijkbare wijze:
+
+`meltano add loader <target-name>`
+
+Op de [Meltano Hub](https://hub.meltano.com/extractors/tap-hubspot) kun je ook targets vinden die publiek beschikbaar zijn.
+
+Het testen van een target kan soms wat lastiger zijn omdat je target niet altijd opties heeft voor een veilige test omgeving. Daarom kan het fijn werken om een klein output bestand van een tap te gebruiken bij het testen van een target. Hiervoor kun je het volgende command gebruiken:
+
+`cat ./output/tap-output-file-with-a-few-rows.txt | meltano invoke <target-name>`
+
+Op deze wijze kun je eerst op kleine schaal testen of de target naar wens werkt voordat je aanpassingen gaat maken in een productie systeem.
+
+### 1. Hubspot target toevoegen
+
+Met de onderstaande command voeg je de Meltano variant van de Hubspot target toe:
+
+`meltano add loader target-hubspot`
+
+Nadat dit command succesvol is uitgevoerd zie je de volgende toevoeging in het `meltano.yml` bestand:
+
+```yaml
+plugins:
+  loaders:
+    - name: target-hubspot
+      variant: meltanolabs
+      pip_url: git+https://github.com/MeltanoLabs/target-hubspot.git
+```
+
+De volgende stap is om de target te configureren zodat het daadwerkelijk data naar Hubspot kan wegschrijven. Op de [Git repository van de target](https://github.com/MeltanoLabs/target-hubspot) lees je welke configuraties vereist en/of mogelijk zijn.
+
+Hieronder zie je stap voor step aan welke configuraties je moet denken:
+
+```yml
+- name: target-hubspot
+  variant: meltanolabs
+  pip_url: git+https://github.com/MeltanoLabs/target-hubspot.git
+  config:
+    access_token: ${HUBSPOT_TOKEN}
+    import_operations: UPSERT
+```
+
+Net zoals bij de tap is de `access_token` vereist om connectie te kunnen maken met Hubspot. Met de `import_operations` parameter kun je aangeven hoe je wilt dat data wordt geimporteerd naar Hubspot. Je kunt kiezen tussen `UPDATE`, `CREATE` en `UPSERT`. In dit voorbeeld is gekozen voor `UPSERT` zodat bestaande records worden geupdate en nieuwe records worden toegevoegd.
+
+Vervolgens voegen we een `column_mapping` toe zoals hieronder weergeven:
+
+```yml
+- name: target-hubspot
+  variant: meltanolabs
+  pip_url: git+https://github.com/MeltanoLabs/target-hubspot.git
+  config:
+    access_token: ${HUBSPOT_TOKEN}
+    import_operations: UPSERT
+    column_mapping:
+      - columnName: PROPERTIES__CUSTOM_PROPERTY # Kolom naam in tap
+        propertyName: custom_property # Kolom naam in Hubspot
+        columnObjectTypeId: 0-1 # Kolom type
+      - columnName: PROPERTIES__EMAIL
+        propertyName: email
+        columnObjectTypeId: 0-1
+      - columnName: PROPERTIES__FIRSTNAME
+        propertyName: firstname
+        columnObjectTypeId: 0-1
+      - columnName: PROPERTIES__LASTNAME
+        propertyName: lastname
+        columnObjectTypeId: 0-1
+```
+
+Deze `column_mapping` geeft aan hoe de kolommen uit de tap overeenkomen met velden in Hubspot. Voor elke kolom moet je het volgende aangeven:
+
+1. `columnName`: de kolom naam zoals het voorkomt in de tap
+2. `propertyName`: de interne naam die Hubspot gebruikt voor dit veld (in Hubspot kun je dit vinden via Settings > Data Management > Properties)
+3. `columnObjectTypeId`: de typeid van het Hubspot object waartoe dit veld behoort (e.g. Deals, Contact etc. / zie dit [Hubspot artikel](https://developers.hubspot.com/docs/api/crm/understanding-the-crm#object-type-id))
+
+In het bovenstaande voorbeeld zijn er dus 4 kolommen die uit de tap komen genaamd: `PROPERTIES__CUSTOM_PROPERTY`, `PROPERTIES__EMAIL`, `PROPERTIES__FIRSTNAME` en `PROPERTIES__LASTNAME`. Deze corresponderen met de Hubspot velden: `custom_property`, `email`, `firstname` en `lastname`. Dit geld voor het Hubspot object type `0-1`, wat het Contacts object in Hubspot is.
+
+Het kan echter voorkomen in praktijk dat de tap die je wilt koppelen aan de Hubspot target ook kolommen mee geeft die niet bestaan of die je niet zelf wilt updaten. Bijvoorbeeld een `updated_at` kolom laat je liever aan Hubspot zelf om te updaten. Zulke kolommen kun je aan de hand van `stream_maps` achterwege laten. Hieronder zie je hoe je dit configureert:
+
+```yaml
+- name: target-hubspot
+  variant: meltanolabs
+  pip_url: git+https://github.com/MeltanoLabs/target-hubspot.git
+  config:
+    access_token: ${HUBSPOT_TOKEN}
+    import_operations: UPSERT
+    stream_maps:
+      DEVELOPMENT-TAP_HUBSPOT-CONTACTS: # Naam van de stream
+        UPDATED_AT: __NULL__
+        ID: __NULL__
+```
+
+In de `stream_maps` config moet je eerst de stream naam specificeren waarvoor je aanpassingen wilt maken. De stream naam van een tap kun je vinden door de output van je tap te bekijken. Met dit command `meltano invoke tap-naar-keuze > ./output/tap-output.txt` schrijf je de output makkelijk wel naar een tekst bestand.
+
+Een van de eerste regels van dit bestand beschrijft de schema van de tap met daarin ook een stream key waarvan de waarde aangeeft wat de stream naam is. In het geval hieronder dus `dbo-mock_data`.
+
+`{"type": "SCHEMA", "stream": "dbo-mock_data", "schema": ...}`
+
+Vervolgens kun je bepaalde mappings en/of andere aanpassingen uitvoeren op de beschikbare kolommen voordat deze naar de target worden gestuurd. In het voorbeeld hierboven zien we dat de `UPDATED_AT` en `ID` kolom beiden op `__NULL__` worden gezet. Dit houdt in dat je er expliciet voor kiest om deze kolommen niet mee te geven aan de target.
+
+Voor meer en/of andere mapping mogelijkheden kun je het beste terecht bij [deze documentatie pagina](https://sdk.meltano.com/en/latest/stream_maps.html) van Meltano.
+
+Al met al is de configuratie van de `target-hubspot` dus afhankelijk van met welke tap je deze wilt gaan gebruiken. In de `column_mapping` geef je aan hoe de kolommen tussen de tap en Hubspot overeenkomen en het kan voorkomen dat je bepaalde kolommen uit de tap expliciet wilt negeren waarvoor je de `stream_maps` kunt gebruiken.
+
+### 2. MS SQL target toevoegen
+
+Met de onderstaande command voeg je de Meltano variant van de MS SQL target toe:
+
+`meltano add loader target-mssql`
+
+Nadat dit command succesvol is uitgevoerd zie je de volgende toevoeging in het `meltano.yml` bestand:
+
+```yaml
+- name: target-mssql
+  variant: storebrand
+  pip_url: git+https://github.com/storebrand/target-mssql.git
+```
+
+De volgende stap is om de target te configureren zodat het daadwerkelijk data naar MS SQL kan wegschrijven. Op de [Git repository van de target](https://github.com/storebrand/target-mssql) lees je welke configuraties vereist en/of mogelijk zijn.
+
+```yaml
+- name: target-mssql
+  variant: storebrand
+  pip_url: git+https://github.com/storebrand/target-mssql.git
+  config:
+    host: host.docker.internal
+    database: test
+    port: "1433"
+    username: sa
+    password: password123UP
+```
+
+## Pipeline runnen: hoe koppel je een tap / target
+
+Nadat de taps en targets zijn geinstalleerd met configuratie kun je ze gezamelijk gaan uitvoeren. Dit doe je in meltano aan de hand van het `meltano run <tap-naam> <target-naam>` command. De volgende command zou bijvoorbeeld data uit Hubspot ingesten en naar MS SQL wegschrijven:
+
+`meltano run tap-hubspot target-mssql`
+
+Wanneer een tap incremental loading ondersteunt houdt Meltano ook automatisch de state bij van jouw pipelines. De state van je runs kun je terug vinden aan de hand van de volgende command:
+
+`meltano state list`
+
+Dit command zal een lijst laten zien van id's van specifiek runs die je hebt uitgevoerd. Een id is altijd opgebouwd uit de volgende componenten: `<environment_name>:<tap_name>-to-<target_name>(:<state_id_suffix)`. Wanneer voor een specifieke run de laatste state value wil bekijken kun je het volgende command gebruiken:
+
+`meltano state get dev:tap-hubspot-to-target-mssql`
+
+# Dagster
+
+Het is mogelijk om je Meltano pipelines te orchestraten binnen Dagster. Hiervoor kun je de `dagter-meltano` plugin gebruiken die wij hebben ontwikkelt. Dit proces bestaat uit een aantal stappen:
+
+### 1. Pipelines definieren die je wilt uitvoeren in `meltano.yml`
+
+Hieronder maken we bijvoorbeeld een job aan die een reeks van taken moet gaan uitvoeren. In dit geval bijvoorbeeld zowel het uitvoeren van de `tap-hubspot` naar `target-mssql` als andersom.
+
+```yaml
+jobs:
+  - name: test-job
+    tasks:
+      - tap-hubspot target-mssql
+      - tap-mssql target-hubspot
+```
+
+### 2. Schedule aangeven hoe vaak je de pipeline wilt uitvoeren in `meltano.yml`
+
+Bijvoorbeeld een dagelijkse run
+
+```yaml
+schedules:
+  - name: daily-test-job
+    interval: "@daily"
+    job: test-job
+```
+
+### 3. Dagster koppelen aan het meltano project met de `dagster-meltano` plugin
+
+In de `orchestrate/dagster/respository.py` koppelen we het Dagster aan het Meltano project. Met slechts enkel wat boilerplate code staat zo onze pipeline in Dagster.
+
+Je kunt Dagster lokaal starten door middel van het volgende command (vanaf root folder):
+
+`dagster dev -f orchestrate/dagster/repository.py`
+
+Let op dat je hierbij de poetry environment gebruikt. Ofwel als je de error `bash: dagster: command not found` krijgt moet je nog even `poetry shell` runnen.
